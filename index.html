@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Budget Traveller with Coupons</title>
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--tx:#1b1f2a;--mut:#66708a;--ac:#2563eb;--ok:#15803d;--okbg:#e6f6ec;--cp:#b45309;--cpbg:#fff3df;--bd:#e0e4ee;--hi:#eaf1ff;--bad:#b91c1c}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1118;--card:#171b25;--tx:#e8ebf3;--mut:#9aa4bd;--ac:#6ea0ff;--ok:#5ad08a;--okbg:#14301f;--cp:#f5b35a;--cpbg:#36280f;--bd:#2a3042;--hi:#1a2540;--bad:#ff8080}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:16px}
+h1{font-size:1.5rem;margin:8px 0 2px}h2{font-size:1.1rem;margin:0 0 10px}
+.sub{color:var(--mut);margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+label{display:block;font-size:.8rem;color:var(--mut);margin-bottom:3px}
+input,select,textarea{width:100%;padding:8px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+textarea{font-family:ui-monospace,Menlo,Consolas,monospace;min-height:130px;resize:vertical}
+button{padding:9px 16px;border:0;border-radius:8px;background:var(--ac);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button.alt{background:transparent;color:var(--ac);border:1px solid var(--ac)}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.err{color:var(--bad);font-weight:600;margin-top:8px}
+.steps{margin:0 0 10px;padding-left:20px;color:var(--mut)}
+.route{border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:10px}
+.route.best{border-color:var(--ac);background:var(--hi)}
+.path{font-weight:700;margin-bottom:6px}
+.stats{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+.stats b{display:block;font-size:1.05rem}.stats span{font-size:.75rem;color:var(--mut)}
+.fl{display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-top:1px dashed var(--bd);flex-wrap:wrap}
+.tag{padding:1px 8px;border-radius:99px;font-size:.75rem;font-weight:700;background:var(--cpbg);color:var(--cp)}
+.note{font-size:.82rem;color:var(--mut);margin-top:6px}
+.ok{background:var(--okbg);color:var(--ok);padding:8px 10px;border-radius:8px;font-weight:600;margin-top:8px}
+.bad{background:#fde8e8;color:var(--bad)}
+.scroll{overflow-x:auto;margin-bottom:12px}
+.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
+.tbl th,.tbl td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--bd);white-space:nowrap}
+.badge{display:inline-block;background:var(--ac);color:#fff;border-radius:99px;padding:0 9px;font-size:.78rem;margin-right:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>✈️ Budget Traveller with Coupons</h1>
+<p class="sub">Find the cheapest or fastest journey within your stop limit, with coupons placed where they save the most.</p>
+
+<div class="card">
+<h2>1. Enter your trip</h2>
+<label for="fl">Flights, one per line: <code>from to price minutes</code></label>
+<textarea id="fl"></textarea>
+<div class="grid" style="margin-top:10px">
+<div><label for="n">Number of cities</label><input id="n" type="number" min="2" value="4"></div>
+<div><label for="st">Start city</label><input id="st" type="number" min="1" value="1"></div>
+<div><label for="en">Destination city</label><input id="en" type="number" min="1" value="4"></div>
+<div><label for="sp">Max intermediate stops</label><input id="sp" type="number" min="0" value="1"></div>
+<div><label for="cp">Coupons</label><input id="cp" type="number" min="0" value="1"></div>
+<div><label for="md">Mode</label><select id="md"><option value="both">Cheapest + Fastest</option><option value="cheapest">Cheapest</option><option value="fastest">Fastest</option></select></div>
+</div>
+<div class="row"><button id="go">Find best routes</button><button class="alt" id="demo">Load demo</button></div>
+<div id="msg" class="err"></div>
+</div>
+<div id="out"></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const DEMO="1 2 1000 120\n2 4 1000 150\n1 3 1500 180\n3 4 500 100\n1 4 3200 120";
+const sav=p=>p-Math.floor(p/2);
+const sum=(a,f)=>a.reduce((x,y)=>x+f(y),0);
+const ft=m=>Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m";
+
+function parseFlights(n){
+  const out=[];
+  $("fl").value.split("\n").map(s=>s.trim()).filter(Boolean).forEach((l,i)=>{
+    const a=l.split(/[\s,]+/).map(Number);
+    if(a.length!==4||a.some(x=>!Number.isInteger(x))||a[2]<0||a[3]<0)
+      throw new Error("Line "+(i+1)+": need 4 whole numbers (from to price minutes), no negatives.");
+    if(a[0]<1||a[0]>n||a[1]<1||a[1]>n)
+      throw new Error("Line "+(i+1)+": cities must be between 1 and "+n+".");
+    out.push({s:a[0],d:a[1],p:a[2],t:a[3]});
+  });
+  if(!out.length) throw new Error("Please add at least one flight.");
+  return out;
+}
+
+// Step 1: DFS over all simple routes within the flight limit
+function findRoutes(fl,s,e,maxF){
+  const g={},res=[];
+  fl.forEach(f=>(g[f.s]=g[f.s]||[]).push(f));
+  (function go(c,path,vis){
+    if(c===e){res.push([...path]);return}
+    if(path.length===maxF)return;
+    for(const f of g[c]||[]) if(!vis.has(f.d)){
+      vis.add(f.d);path.push(f);go(f.d,path,vis);path.pop();vis.delete(f.d);
+    }
+  })(s,[],new Set([s]));
+  return res;
+}
+
+// Step 2: smart coupons = biggest savings first
+function alloc(path,k){
+  const idx=path.map((_,i)=>i).sort((a,b)=>sav(path[b].p)-sav(path[a].p)||a-b);
+  const ch=new Set(idx.slice(0,k).filter(i=>sav(path[i].p)>0));
+  const co=path.map((_,i)=>ch.has(i));
+  const paid=path.map((f,i)=>co[i]?Math.floor(f.p/2):f.p);
+  const full=sum(path,f=>f.p),cost=sum(paid,x=>x);
+  return {path,co,paid,full,cost,saved:full-cost,time:sum(path,f=>f.t),
+    naive:path.reduce((a,f,i)=>a+(i<k?Math.floor(f.p/2):f.p),0)};
+}
+
+// Step 3: rank
+function plan(fl,s,e,stops,k,mode){
+  const all=findRoutes(fl,s,e,stops+1).map(p=>alloc(p,k));
+  all.sort(mode==="fastest"?(a,b)=>a.time-b.time||a.cost-b.cost:(a,b)=>a.cost-b.cost||a.time-b.time);
+  return all;
+}
+
+// Independent check: dynamic programming
+function dpCost(fl,n,s,e,stops,k){
+  const F=stops+1,I=Infinity;
+  const dp=Array.from({length:F+1},()=>Array.from({length:k+1},()=>Array(n+1).fill(I)));
+  dp[0][0][s]=0;
+  for(let f=0;f<F;f++)for(let c=0;c<=k;c++)for(const x of fl){
+    const cur=dp[f][c][x.s];if(cur===I)continue;
+    dp[f+1][c][x.d]=Math.min(dp[f+1][c][x.d],cur+x.p);
+    if(c<k)dp[f+1][c+1][x.d]=Math.min(dp[f+1][c+1][x.d],cur+Math.floor(x.p/2));
+  }
+  let b=I;
+  for(let f=0;f<=F;f++)for(let c=0;c<=k;c++)b=Math.min(b,dp[f][c][e]);
+  return b;
+}
+
+const citiesOf=r=>[r.path[0].s,...r.path.map(f=>f.d)];
+
+function routeHTML(r,i,top){
+  const cities=citiesOf(r).map(c=>"City "+c).join(" → ");
+  const vs=i>0?`<div><b>${r.cost-top.cost>=0?"+":"−"}₹${Math.abs(r.cost-top.cost)} · ${r.time-top.time>=0?"+":"−"}${ft(Math.abs(r.time-top.time))}</b><span>vs #1</span></div>`:"";
+  const rows=r.path.map((f,j)=>r.co[j]
+    ?`<div class="fl"><span>${f.s} → ${f.d}: ₹${f.p} → <b>₹${r.paid[j]}</b></span><span class="tag">COUPON · saves ₹${f.p-r.paid[j]}</span></div>`
+    :`<div class="fl"><span>${f.s} → ${f.d}: ₹${f.p}</span><span class="note" style="margin:0">no coupon</span></div>`).join("");
+  const nv=r.naive>r.cost?`<div class="note">Smart coupons beat “coupons on first flights” by ₹${r.naive-r.cost} (naive cost: ₹${r.naive}).</div>`:"";
+  return `<div class="route ${i===0?"best":""}"><div class="path"><span class="badge">#${i+1}</span>${cities}</div>
+  <div class="stats"><div><b>₹${r.cost}</b><span>final cost</span></div><div><b>${ft(r.time)}</b><span>total time</span></div>
+  <div><b>₹${r.full}</b><span>full price</span></div><div><b>₹${r.saved}</b><span>saved by coupons</span></div>
+  <div><b>${r.path.length}</b><span>flights</span></div><div><b>${r.path.length-1}</b><span>stops</span></div>${vs}</div>${rows}${nv}</div>`;
+}
+
+function section(mode,fl,n,s,e,stops,k){
+  const all=plan(fl,s,e,stops,k,mode);
+  let h=`<div class="card"><h2>${mode==="fastest"?"⚡ Fastest":"💰 Cheapest"} routes</h2>`;
+  if(!all.length)return h+`<p class="err">No valid journey found. Try allowing more stops.</p></div>`;
+  const top=all.slice(0,3);
+  h+=`<ol class="steps"><li>Searched every route within ${stops+1} flight(s): <b>${all.length}</b> found.</li>
+  <li>Gave coupons to the flights where they save the most.</li>
+  <li>Ranked by ${mode==="fastest"?"total time":"final cost"}; showing the top ${top.length}.</li></ol>`;
+  h+=`<div class="scroll"><table class="tbl"><tr><th>#</th><th>Route</th><th>Cost</th><th>Time</th><th>Saved</th></tr>`+
+    top.map((r,i)=>`<tr><td>${i+1}</td><td>${citiesOf(r).join(" → ")}</td><td>₹${r.cost}</td><td>${ft(r.time)}</td><td>₹${r.saved}</td></tr>`).join("")+`</table></div>`;
+  h+=top.map((r,i)=>routeHTML(r,i,top[0])).join("");
+  const b=top[0];
+  h+=`<h2 style="margin-top:14px">Why these coupons? (route #1)</h2><div class="scroll"><table class="tbl"><tr><th>Flight</th><th>Price</th><th>Saving if coupon</th><th>Decision</th></tr>`+
+    b.path.map((f,j)=>`<tr><td>${f.s} → ${f.d}</td><td>₹${f.p}</td><td>₹${sav(f.p)}</td><td>${b.co[j]?'<span class="tag">COUPON</span>':"–"}</td></tr>`).join("")+
+    `</table></div><div class="note">Rule: the ${k} coupon(s) go to the flights with the biggest saving.</div>`;
+  if(mode==="cheapest"){
+    const d=dpCost(fl,n,s,e,stops,k),good=d===b.cost;
+    h+=`<div class="ok ${good?"":"bad"}">${good?"✔ MATCH":"✖ MISMATCH"} — Self-check: dynamic programming says ₹${d}, route search says ₹${b.cost}.</div>`;
+  }else{
+    const c=plan(fl,s,e,stops,k,"cheapest")[0];
+    h+=`<div class="ok">Trade-off: the fastest route costs ₹${b.cost-c.cost} more than the cheapest option (₹${c.cost}).</div>`;
+  }
+  return h+"</div>";
+}
+
+function run(){
+  $("msg").textContent="";$("out").innerHTML="";
+  try{
+    const n=+$("n").value,s=+$("st").value,e=+$("en").value,stops=+$("sp").value,k=+$("cp").value;
+    if(![n,s,e,stops,k].every(Number.isInteger)||n<2||stops<0||k<0)
+      throw new Error("Cities must be 2 or more; stops and coupons must be 0 or more.");
+    if(s<1||s>n||e<1||e>n)throw new Error("Start and destination must be between 1 and "+n+".");
+    const fl=parseFlights(n);
+    if(s===e){$("out").innerHTML='<div class="card">You are already at the destination. Cost: ₹0.</div>';return}
+    const m=$("md").value,modes=m==="both"?["cheapest","fastest"]:[m];
+    $("out").innerHTML=modes.map(x=>section(x,fl,n,s,e,stops,k)).join("");
+  }catch(err){$("msg").textContent=err.message}
+}
+function demo(){
+  $("fl").value=DEMO;$("n").value=4;$("st").value=1;$("en").value=4;$("sp").value=1;$("cp").value=1;$("md").value="both";run();
+}
+$("go").onclick=run;$("demo").onclick=demo;demo();
+</script>
+</body>
+</html>
